@@ -61,8 +61,9 @@ install_repo() {
 
 install_repo repl "$REPL_REPO_URL" "$REPL_BRANCH" false
 
-# Cherry-pick EOL flush commit for v4.9.0 and under.
-if version_lte "$REPL_BRANCH" "v4.9.0"; then
+# Cherry-pick EOL flush commit for v4.9.0 and under (incl. v4.9.0-rc* prereleases,
+# which version_lte's vX.Y.Z regex doesn't accept).
+if version_lte "$REPL_BRANCH" "v4.9.0" || [[ "$REPL_BRANCH" == v4.9.0-rc* ]]; then
   echo "Applying commit 4fc1e6d1dda170e8f0a6b698dd5f7e17a9cf52b4 for $REPL_BRANCH (<=v4.9.0)..."
   pushd repl
     git fetch origin 4fc1e6d1dda170e8f0a6b698dd5f7e17a9cf52b4
