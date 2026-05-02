@@ -100,6 +100,12 @@ install_repo repl "$REPL_REPO_URL" "$REPL_BRANCH" false
 # which version_lte's vX.Y.Z regex doesn't accept). ``-X theirs`` auto-resolves
 # the trivial v4.9.0-rc1 conflict (the patch's parent has minor cosmetic drift
 # from the v4.9.0-rc1 tag); the resolution is exactly what we want anyway.
+# After the cherry-pick we then ``checkout`` ``lean-toolchain`` and the
+# ``test/Mathlib/{lean-toolchain,lake-manifest.json}`` back to ``${REPL_BRANCH}``
+# -- the patch was authored against v4.10.0-rc1 and ``-X theirs`` would otherwise
+# bump the REPL toolchain to v4.10, silently invalidating Mathlib oleans built
+# against v4.9.0-rc1 (the REPL would still start, but ``import`` would no-op
+# because Lean drops mismatched oleans without raising).
 # Idempotent: skipped once ``printFlush`` is already in REPL/Main.lean.
 if version_lte "$REPL_BRANCH" "v4.9.0" || [[ "$REPL_BRANCH" == v4.9.0-rc* ]]; then
   if grep -q 'printFlush' repl/REPL/Main.lean 2>/dev/null; then
@@ -110,6 +116,8 @@ if version_lte "$REPL_BRANCH" "v4.9.0" || [[ "$REPL_BRANCH" == v4.9.0-rc* ]]; th
       git fetch origin 4fc1e6d1dda170e8f0a6b698dd5f7e17a9cf52b4
       git -c user.name="kimina-lean-server" -c user.email="setup@kimina-lean-server" \
         cherry-pick -X theirs 4fc1e6d1dda170e8f0a6b698dd5f7e17a9cf52b4
+      git checkout "${REPL_BRANCH}" -- lean-toolchain \
+        test/Mathlib/lean-toolchain test/Mathlib/lake-manifest.json
       lake build
     popd
   fi
