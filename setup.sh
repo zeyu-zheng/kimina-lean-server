@@ -16,13 +16,22 @@ MATHLIB_BRANCH="${MATHLIB_BRANCH:-$LEAN_SERVER_LEAN_VERSION}"
 command -v curl >/dev/null 2>&1 || { echo >&2 "curl is required"; exit 1; }
 command -v git  >/dev/null 2>&1 || { echo >&2 "git is required";  exit 1; }
 
-echo "Installing Elan"
-curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf \
-  | sh -s -- --default-toolchain "${LEAN_SERVER_LEAN_VERSION}" -y
+# Install Elan only if not already present (elan-init.sh prompts on existing
+# installs which breaks ``set -e``). When elan is there we just ensure the
+# requested toolchain is on disk via ``elan toolchain install``, which is a
+# no-op if already cached.
+if command -v elan >/dev/null 2>&1; then
+  echo "elan already installed: $(elan --version)"
+else
+  echo "Installing Elan"
+  curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf \
+    | sh -s -- --default-toolchain "${LEAN_SERVER_LEAN_VERSION}" -y
+fi
 source "$HOME/.elan/env"
+elan toolchain install "${LEAN_SERVER_LEAN_VERSION}" >/dev/null
 
 echo "Installing Lean ${LEAN_SERVER_LEAN_VERSION}"
-lean --version
+lean +"${LEAN_SERVER_LEAN_VERSION}" --version
 
 # Version comparison function - only proceeds if args are in vX.Y.Z format.
 version_lte() {
