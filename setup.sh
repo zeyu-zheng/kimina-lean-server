@@ -43,12 +43,38 @@ version_lte() {
 install_repo() {
   local name="$1" url="$2" branch="$3" upd_manifest="$4"
   echo "Installing ${name}@${branch}..."
-  if [ ! -d "$name" ]; then
+  if [ ! -d "$name/.git" ]; then
+    rm -rf "$name"
     git clone --branch "${branch}" --single-branch --depth 1 "$url" "$name"
   fi
   pushd "$name"
-    git checkout "${branch}"
+    # Skip the branch checkout if HEAD is already a descendant of the
+    # requested branch tip -- preserves cherry-picks already applied to repl/
+    # (e.g. the EOL-flush patch below) across re-runs.
+    target_sha=$(git rev-parse --verify "${branch}^{commit}" 2>/dev/null || true)
+    head_sha=$(git rev-parse HEAD)
+    if [ -z "$target_sha" ] || ! git merge-base --is-ancestor "$target_sha" "$head_sha"; then
+      git checkout "${branch}"
+    else
+      echo "HEAD ($head_sha) already includes ${branch} ($target_sha); skipping checkout"
+    fi
     if [ "$name" = "mathlib4" ]; then
+      # ``lake exe cache get`` builds the cache binary which triggers
+      # dependency fetch; mathlib4's manifest pins commits that have been
+      # force-pushed off their branches (e.g. Qq's ``bump toolchain``) and
+      # ``git clone`` alone won't have them, so pre-fetch each pinned SHA by
+      # hand. GitHub keeps unreachable commits accessible by SHA for ~30d.
+      python3 - <<'PY'
+import json, os, subprocess, sys
+manifest = json.load(open("lake-manifest.json"))
+for pkg in manifest["packages"]:
+    pname, purl, prev = pkg["name"], pkg["url"], pkg["rev"]
+    dest = f".lake/packages/{pname}"
+    if not os.path.isdir(os.path.join(dest, ".git")):
+        print(f"  pre-fetch {pname} @ {prev[:8]}", flush=True)
+        subprocess.check_call(["git", "clone", purl, dest])
+        subprocess.check_call(["git", "-C", dest, "fetch", "origin", prev])
+PY
       lake exe cache get
     fi
     lake build
@@ -62,14 +88,22 @@ install_repo() {
 install_repo repl "$REPL_REPO_URL" "$REPL_BRANCH" false
 
 # Cherry-pick EOL flush commit for v4.9.0 and under (incl. v4.9.0-rc* prereleases,
-# which version_lte's vX.Y.Z regex doesn't accept).
+# which version_lte's vX.Y.Z regex doesn't accept). ``-X theirs`` auto-resolves
+# the trivial v4.9.0-rc1 conflict (the patch's parent has minor cosmetic drift
+# from the v4.9.0-rc1 tag); the resolution is exactly what we want anyway.
+# Idempotent: skipped once ``printFlush`` is already in REPL/Main.lean.
 if version_lte "$REPL_BRANCH" "v4.9.0" || [[ "$REPL_BRANCH" == v4.9.0-rc* ]]; then
-  echo "Applying commit 4fc1e6d1dda170e8f0a6b698dd5f7e17a9cf52b4 for $REPL_BRANCH (<=v4.9.0)..."
-  pushd repl
-    git fetch origin 4fc1e6d1dda170e8f0a6b698dd5f7e17a9cf52b4
-    git cherry-pick 4fc1e6d1dda170e8f0a6b698dd5f7e17a9cf52b4
-    lake build
-  popd
+  if grep -q 'printFlush' repl/REPL/Main.lean 2>/dev/null; then
+    echo "EOL-flush patch already applied to repl/; skipping cherry-pick"
+  else
+    echo "Applying commit 4fc1e6d1dda170e8f0a6b698dd5f7e17a9cf52b4 for $REPL_BRANCH (<=v4.9.0)..."
+    pushd repl
+      git fetch origin 4fc1e6d1dda170e8f0a6b698dd5f7e17a9cf52b4
+      git -c user.name="kimina-lean-server" -c user.email="setup@kimina-lean-server" \
+        cherry-pick -X theirs 4fc1e6d1dda170e8f0a6b698dd5f7e17a9cf52b4
+      lake build
+    popd
+  fi
 fi
 
 install_repo mathlib4 "$MATHLIB_REPO_URL" "$MATHLIB_BRANCH" true
